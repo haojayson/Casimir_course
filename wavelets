@@ -1,0 +1,70 @@
+import numpy as np
+import pandas as pd
+
+file_path = "signal.txt"
+signal = pd.read_csv(file_path, delimiter="\t", header=None)
+fs = 1e6
+
+# offset compensation
+total_signal = np.sum(signal.iloc[0:30, 0]) # noise part
+mean_signal = total_signal / len(range(0, 30)) # mean value of noise
+signal = signal - mean_signal # compensation
+# print(signal)
+
+# Fourier transform
+N = len(signal) # length of signal
+spectrum = np.zeros(N, dtype=complex)
+for k in range(N): # frequency
+    for j in range(N): # intergral
+        spectrum[k] += signal.iloc[j, 0] * np.exp( -1j * 2 * np.pi * k * j / N )
+# print(spectrum)
+conjugate = np.real(spectrum) - 1j * np.imag(spectrum) # complex conjugate
+spectrum_amp = np.sqrt(spectrum * conjugate)
+# print(spectrum_amp)
+# comparison with python/matlab package
+
+# finess and range of the wavelet filterbank
+frange = [50, 500e3] # frequency range
+wrange = ( np.array(frange) * 1 / fs * 2 * np.pi ) # convert frequencies in Hz to normalized radians
+nv = 10 # filter fineness, voice per octave
+a0 = 2 ** (1 / nv)
+ad_con = 6 # set to 6 to satisfy the admissibility condition
+s0 = ad_con / wrange[1]
+smax = ad_con / wrange[0]
+num_octave = np.log2(smax / s0)
+scales = s0 * a0 ** np.arange(nv * num_octave) # dimensionless scale
+frequency_scale = 500e3 / a0 ** np.arange(133) # frequency scale
+
+# determine dimensionless frequency for wavelet filterbank
+omega = np.arange(1, N // 2 + 1)
+omega = omega * (2 * np.pi) / N
+omega_re = omega[::-1]
+omega_final = np.concatenate(([0], omega, -omega_re[0:249]))
+somega = scales[:, np.newaxis] * omega_final
+
+# wavelet filterbank in the frequency domain
+nor_amplitude = 2  # normalized amplitude to 2
+squareterm = (somega - ad_con) * (somega - ad_con)
+gaussexp = -squareterm / 2
+expnt = gaussexp * (somega > 0)
+cwt_filter = nor_amplitude * np.exp(expnt) * (somega > 0)
+# print(cwt_filter)
+# comparison with matlab package
+
+# perform CWT on the signal in the frequency domain
+cfsposdft = spectrum * cwt_filter
+# print(cfsposdft)
+
+# transform the filtered signal back to time domain
+cfs_ifft = np.zeros((133, N))
+# stupid loop, needs to be optimized
+for i in range(133):
+    for j in range(N):
+        for k in range(N):
+            cfs_ifft[i, j] += cfsposdft[i, k] * np.exp(
+                1j * 2 * np.pi * k * j / N
+            )
+cfs_ifft /= N  # scale the signal
+fre_i = np.real(cfs_ifft)
+# comparison with matlab
+
